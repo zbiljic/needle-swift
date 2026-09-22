@@ -2,6 +2,19 @@
 description = "Install pinned development tools"
 run = "mise install"
 
+[tasks.fmt]
+alias = "format"
+description = "Format project source code"
+depends = ["swift:format"]
+
+[tasks."fmt:check"]
+description = "Check source formatting"
+depends = ["swift:format-check"]
+
+[tasks.lint]
+description = "Run static analysis"
+depends = ["swift:lint"]
+
 [tasks.build]
 description = "Build the library"
 run = "swift build"
@@ -18,7 +31,7 @@ run = "swift test --filter NativeIntegrationTests"
 
 [tasks.check]
 description = "Run the full local validation suite"
-depends = ["test"]
+depends = ["fmt:check", "lint", "test"]
 
 [tasks."pre-commit"]
 alias = "prk"

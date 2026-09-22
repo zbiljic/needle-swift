@@ -1,0 +1,11 @@
+[tasks."swift:format"]
+description = "Format Swift source code"
+run = "swiftformat ."
+
+[tasks."swift:format-check"]
+description = "Check Swift source formatting"
+run = "swiftformat --lint ."
+
+[tasks."swift:lint"]
+description = "Lint Swift source code"
+run = "swiftlint lint --strict"
