@@ -13,7 +13,7 @@ depends = ["swift:format-check"]
 
 [tasks.lint]
 description = "Run static analysis"
-depends = ["swift:lint"]
+depends = ["ci:lint", "swift:lint"]
 
 [tasks.build]
 description = "Build the library"

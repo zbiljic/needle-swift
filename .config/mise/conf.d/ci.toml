@@ -1,0 +1,3 @@
+[tasks."ci:lint"]
+description = "Lint GitHub Actions workflows"
+run = "actionlint"
