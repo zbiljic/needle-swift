@@ -1,0 +1,28 @@
+# Language and layout
+--swift-version 6.3
+--language-mode 6.3
+--indent 4
+--linebreaks lf
+--maxwidth 120
+
+# Deterministic wrapping and grouping
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--wrapconditions before-first
+--trailing-commas collections-only
+--decimalgrouping 3,6
+--binarygrouping 4,8
+--hexgrouping 4,8
+--octalgrouping 4,8
+
+# Source policy
+--ifdef indent
+--self remove
+--stripunusedargs closure-only
+--funcattributes prev-line
+--enable blankLinesAtEndOfScope,privateStateVariables,validateTestCases
+--disable modifierOrder,swiftTestingTestCaseNames
+
+# Generated and third-party content
+--exclude Derived,DerivedData,.build,.swiftpm,*.xcodeproj,*.xcworkspace
