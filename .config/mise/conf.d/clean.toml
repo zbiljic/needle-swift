@@ -1,0 +1,3 @@
+[tasks.clean]
+description = "Remove Swift package build artifacts"
+run = "swift package clean"

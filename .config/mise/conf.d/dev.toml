@@ -1,0 +1,26 @@
+[tasks.setup]
+description = "Install pinned development tools"
+run = "mise install"
+
+[tasks.build]
+description = "Build the library"
+run = "swift build"
+
+[tasks.test]
+alias = "t"
+description = "Run offline tests"
+run = "swift test"
+
+[tasks."test:native"]
+description = "Download both pinned engines and run native integration tests"
+env.NEEDLE_NATIVE_TEST = "1"
+run = "swift test --filter NativeIntegrationTests"
+
+[tasks.check]
+description = "Run the full local validation suite"
+depends = ["test"]
+
+[tasks."pre-commit"]
+alias = "prk"
+description = "Run the full local development gate"
+depends = ["check"]
