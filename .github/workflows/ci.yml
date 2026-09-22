@@ -33,3 +33,6 @@ jobs:
 
       - name: Build release
         run: swift build -c release
+
+      - name: Test Needle 2 and Needle 3 together
+        run: mise run test:native
