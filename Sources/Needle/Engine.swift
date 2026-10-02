@@ -3,7 +3,7 @@ import Foundation
 
 /// Downloads the same pinned Needle engines and base weights as needle-go.
 public enum Engine {
-    public static let version = "3.0.1"
+    public static let version = "3.1.0"
     static let maximumArtifactSize = 64 * 1024 * 1024
 
     public enum Platform: String, CaseIterable, Sendable {
@@ -248,7 +248,7 @@ struct EngineRelease {
     var rootURL: String {
         let revision = generation == 2
             ? "32e9e3a93b205f786929697446ae669cf0a84579"
-            : "9da75122d4ca11aa4a667281c9c8ba38a7eed679"
+            : "c7c415a3d1b3d929014bc6e866d51ebb971f7089"
         return "https://huggingface.co/Cactus-Compute/needle\(generation)/resolve/\(revision)"
     }
 
@@ -258,8 +258,8 @@ struct EngineRelease {
         let checksum = switch (generation, platform) {
         case (2, .darwinARM64): "abae4cca0a4d84ec73da4bde18803b9be812a9209e48fb7fa372002ebaa60265"
         case (2, .darwinAMD64): "071e93d996021b4f6b5bee055777cd81be9f6963d2565115ec461b9f71c7245e"
-        case (_, .darwinARM64): "9d3ba55986ad664ddffac4aec680c0657dc82ad04f868898e8085f13755c025f"
-        case (_, .darwinAMD64): "22d2693ea23439c2934556c2da8d0aaf708d55546a8b9b68a0647333b42501eb"
+        case (_, .darwinARM64): "ad1cba80ede4c058692370964eec4d881a1fdc80014f7210b2d13891bad7d1c6"
+        case (_, .darwinAMD64): "31a90adbaa898ea65e92b370e80ba5830a346348022a913a8bb254ab7d20bad6"
         }
         return EngineArtifact(
             name: libraryName,

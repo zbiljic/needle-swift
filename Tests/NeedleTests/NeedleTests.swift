@@ -325,8 +325,19 @@ func suppressedCallsArePreservedWithoutExecution() async throws {
     #expect(try JSONDecoder().decode(Response.self, from: JSONEncoder().encode(response)) == response)
 }
 
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["NEEDLE_NATIVE_TEST"] == "1"))
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["NEEDLE_NATIVE_TEST"] == "1"))
 struct NativeIntegrationTests {
+    @Test
+    func nativeInitializationDiagnostic() async throws {
+        do {
+            _ = try await Agent(configuration: Configuration(system: String(repeating: "long context ", count: 10000)))
+            Issue.record("Expected context limit failure")
+        } catch {
+            #expect(error.localizedDescription.contains("static prefix"))
+            #expect(error.localizedDescription.contains("context"))
+        }
+    }
+
     @Test
     func downloadsLoadsAndCallsBothGenerations() async throws {
         let tool = Tool(schema: weatherSchema) { (arguments: WeatherArguments) in "Clear in \(arguments.city)" }

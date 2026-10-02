@@ -8,6 +8,9 @@ struct NativeAPI: Sendable {
     typealias Complete = @convention(c) (
         UnsafePointer<CChar>?, Int32, UnsafeMutablePointer<CChar>?, Int32
     ) -> Int32
+    typealias CompleteWithAudio = @convention(c) (
+        UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32, Int32, UnsafeMutablePointer<CChar>?, Int32
+    ) -> Int32
     typealias Reset = @convention(c) () -> Void
     typealias Load = @convention(c) (UnsafeRawPointer?, UInt64) -> Int32
 
@@ -16,34 +19,66 @@ struct NativeAPI: Sendable {
     let reset: @Sendable () -> Void
     let load: @Sendable (UnsafeRawPointer, UInt64) -> Int32
 
+    var lastError: (@Sendable () -> String?)?
+
     static func open(_ path: String) throws -> Self {
         guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
             throw NeedleError.native("load library: \(String(cString: dlerror()))")
         }
-        func symbol<T>(_ name: String, as _: T.Type) throws -> T {
-            guard let address = dlsym(handle, name) else {
-                throw NeedleError.native("missing symbol \(name)")
-            }
-            return unsafeBitCast(address, to: T.self)
-        }
         do {
-            let initialize = try symbol("needle_init", as: Initialize.self)
-            let complete = try symbol("needle_complete", as: Complete.self)
-            let reset = try symbol("needle_reset", as: Reset.self)
-            let load = try symbol("needle_load", as: Load.self)
-            // The engine owns process-global pointers; keep its library mapped for process lifetime.
-            return Self(
-                initialize: { initialize($0, $1, $2) },
-                complete: { text, tokens, buffer in
-                    text.withCString { complete($0, tokens, buffer.baseAddress, Int32(buffer.count)) }
-                },
-                reset: { reset() },
-                load: { load($0, $1) }
-            )
+            // The engine owns process-global pointers; keep it mapped for process lifetime.
+            return try bind { dlsym(handle, $0) }
         } catch {
             dlclose(handle)
             throw error
         }
+    }
+
+    static func bind(resolve: (String) -> UnsafeMutableRawPointer?) throws -> Self {
+        func symbol<T>(_ name: String, as _: T.Type) throws -> T {
+            guard let address = resolve(name) else { throw NeedleError.native("missing symbol \(name)") }
+            return unsafeBitCast(address, to: T.self)
+        }
+        let capabilities = ["needle_models", "needle_transcribe", "needle_set_audio"]
+        let modern = capabilities.contains { resolve($0) != nil }
+        if modern {
+            for name in capabilities + ["needle_last_error", "needle_embed"] where resolve(name) == nil {
+                throw NeedleError.native("unsupported native ABI: missing \(name)")
+            }
+        }
+        let initialize = try symbol("needle_init", as: Initialize.self)
+        let complete: @Sendable (String, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
+        if modern {
+            let function = try symbol("needle_complete", as: CompleteWithAudio.self)
+            complete = { text, tokens, buffer in
+                text.withCString { function($0, nil, 0, tokens, buffer.baseAddress, Int32(buffer.count)) }
+            }
+        } else {
+            let function = try symbol("needle_complete", as: Complete.self)
+            complete = { text, tokens, buffer in
+                text.withCString { function($0, tokens, buffer.baseAddress, Int32(buffer.count)) }
+            }
+        }
+        let reset = try symbol("needle_reset", as: Reset.self)
+        let load = try symbol("needle_load", as: Load.self)
+        var api = Self(
+            initialize: { initialize($0, $1, $2) },
+            complete: complete,
+            reset: { reset() },
+            load: { load($0, $1) }
+        )
+        if let address = resolve("needle_last_error") {
+            let function = unsafeBitCast(address, to: (@convention(c) () -> UnsafePointer<CChar>?).self)
+            api.lastError = { function().map { String(cString: $0) } }
+        }
+        return api
+    }
+
+    /// Read the process-global error before any other native call can replace it.
+    func failure(_ operation: String, code: Int32, fallback: String = "") -> NeedleError {
+        let diagnostic = (lastError?() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = diagnostic.isEmpty ? fallback.trimmingCharacters(in: .whitespacesAndNewlines) : diagnostic
+        return .native("\(operation) failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)"))
     }
 }
 
@@ -91,7 +126,7 @@ actor NativeRuntime {
         let bytes = buffer.prefix(end ?? buffer.count).map { UInt8(bitPattern: $0) }
         if code < 0 {
             let detail = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NeedleError.native("complete failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)"))
+            throw api.failure("complete", code: code, fallback: detail)
         }
         guard end != nil else { throw NeedleError.native("engine response exceeds buffer") }
         var response = try JSONDecoder().decode(Response.self, from: Data(bytes))
@@ -125,7 +160,7 @@ actor NativeRuntime {
             }
             let blob = NSData(data: data)
             let code = api.load(blob.bytes, UInt64(blob.length))
-            guard code >= 0 else { throw NeedleError.native("load weights failed with code \(code)") }
+            guard code >= 0 else { throw api.failure("load weights", code: code) }
             // NSData supplies a stable allocation for engines that retain the weight pointer.
             weightsBlob = blob
             activeWeights = path
@@ -140,7 +175,7 @@ actor NativeRuntime {
             storage[1].bytes.assumingMemoryBound(to: CChar.self),
             storage.count == 3 ? storage[2].bytes.assumingMemoryBound(to: CChar.self) : nil
         )
-        guard code >= 0 else { throw NeedleError.native("initialize failed with code \(code)") }
+        guard code >= 0 else { throw api.failure("initialize", code: code) }
         initializationStorage = storage
         activeID = session.id
         return api
