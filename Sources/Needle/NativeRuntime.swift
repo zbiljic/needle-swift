@@ -11,6 +11,11 @@ struct NativeAPI: Sendable {
     typealias CompleteWithAudio = @convention(c) (
         UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32, Int32, UnsafeMutablePointer<CChar>?, Int32
     ) -> Int32
+    typealias Transcribe = @convention(c) (
+        UnsafePointer<Float>?, Int32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32,
+        UnsafeMutablePointer<CChar>?, Int32
+    ) -> Int32
+    typealias SetAudio = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
     typealias Reset = @convention(c) () -> Void
     typealias Load = @convention(c) (UnsafeRawPointer?, UInt64) -> Int32
     typealias Embed = @convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<Float>?, Int32) -> Int32
@@ -25,6 +30,10 @@ struct NativeAPI: Sendable {
 
     var lastError: (@Sendable () -> String?)?
     var embed: (@Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32)?
+
+    var transcribe: (@Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32)?
+    var setAudio: (@Sendable (AudioOptions) -> Void)?
+    var completeAudio: (@Sendable (UnsafeBufferPointer<Float>, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32)?
 
     static func open(_ path: String) throws -> Self {
         guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
@@ -77,6 +86,13 @@ struct NativeAPI: Sendable {
             api.lastError = { function().map { String(cString: $0) } }
         }
         api.bindEmbedding(resolve("needle_embed"), modern: modern)
+        if modern {
+            try api.bindSpeech(
+                complete: symbol("needle_complete", as: CompleteWithAudio.self),
+                transcribe: symbol("needle_transcribe", as: Transcribe.self),
+                setAudio: symbol("needle_set_audio", as: SetAudio.self)
+            )
+        }
         return api
     }
 
@@ -93,6 +109,32 @@ struct NativeAPI: Sendable {
                 text.withCString { function($0, output.baseAddress, Int32(output.count)) }
             }
         }
+    }
+
+    private mutating func bindSpeech(
+        complete: @escaping CompleteWithAudio,
+        transcribe: @escaping Transcribe,
+        setAudio: @escaping SetAudio
+    ) {
+        completeAudio = { pcm, tokens, output in
+            complete(nil, pcm.baseAddress, Int32(pcm.count), tokens, output.baseAddress, Int32(output.count))
+        }
+        self.transcribe = { pcm, options, output in
+            options.withCStringOptions {
+                transcribe(pcm.baseAddress, Int32(pcm.count), $0, $1, $2, output.baseAddress, Int32(output.count))
+            }
+        }
+        self.setAudio = { options in options.withCStringOptions { setAudio($0, $1, $2) } }
+    }
+
+    func output(_ operation: String, code: Int32, buffer: [CChar]) throws -> Data {
+        let end = buffer.firstIndex(of: 0)
+        let bytes = buffer.prefix(end ?? buffer.count).map { UInt8(bitPattern: $0) }
+        guard code >= 0 else {
+            throw failure(operation, code: code, fallback: String(decoding: bytes, as: UTF8.self))
+        }
+        guard end != nil else { throw NeedleError.native("engine response exceeds buffer") }
+        return Data(bytes)
     }
 
     /// Read the process-global error before any other native call can replace it.
@@ -118,6 +160,8 @@ actor NativeRuntime {
     private var activeWeights: String?
     private var weightsBlob: NSData?
     private var calibratedWeights = false
+    private var speechWeights: String?
+    private var speechBlob: NSData?
     private var initializationStorage: [NSData] = []
 
     init(api: NativeAPI? = nil) {
@@ -125,6 +169,11 @@ actor NativeRuntime {
     }
 
     func initialize(_ session: Session, library: URL) throws {
+        try ensureLibrary(library)
+        try bind(session)
+    }
+
+    private func ensureLibrary(_ library: URL) throws {
         try Task.checkCancellation()
         let path = library.standardizedFileURL.path
         if let libraryPath, libraryPath != path {
@@ -134,7 +183,6 @@ actor NativeRuntime {
             api = try NativeAPI.open(path)
         }
         libraryPath = path
-        try bind(session)
     }
 
     func complete(_ session: Session, text: String, tokens: Int32, reset: Bool = false) throws -> Response {
@@ -147,14 +195,11 @@ actor NativeRuntime {
         let code = buffer.withUnsafeMutableBufferPointer { api.complete(text, tokens, $0) }
         // Cancellation cannot interrupt the native ABI; observe it when inference returns.
         try Task.checkCancellation()
-        let end = buffer.firstIndex(of: 0)
-        let bytes = buffer.prefix(end ?? buffer.count).map { UInt8(bitPattern: $0) }
-        if code < 0 {
-            let detail = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw api.failure("complete", code: code, fallback: detail)
-        }
-        guard end != nil else { throw NeedleError.native("engine response exceeds buffer") }
-        var response = try JSONDecoder().decode(Response.self, from: Data(bytes))
+        return try decodeResponse(session, api: api, code: code, buffer: buffer)
+    }
+
+    private func decodeResponse(_ session: Session, api: NativeAPI, code: Int32, buffer: [CChar]) throws -> Response {
+        var response = try JSONDecoder().decode(Response.self, from: api.output("complete", code: code, buffer: buffer))
         guard !response.type.isEmpty else { throw NeedleError.native("response type is empty") }
         if session.tuned, !calibratedWeights {
             response.confidence = nil
@@ -184,6 +229,73 @@ actor NativeRuntime {
         guard code >= 0 else { throw api.failure("embed", code: code) }
         guard code == size else { throw NeedleError.native("embedding length \(code), want \(size)") }
         return output
+    }
+
+    func initializeSpeech(_ session: SpeechSession, library: URL) throws {
+        try ensureLibrary(library)
+        try bindSpeech(session)
+    }
+
+    @discardableResult
+    private func bindSpeech(_ session: SpeechSession) throws -> NativeAPI {
+        guard let api, api.transcribe != nil, api.setAudio != nil, api.completeAudio != nil else {
+            throw NeedleError.native("engine does not support speech; use Needle 3.1 or newer")
+        }
+        if speechWeights != session.weightsPath {
+            let data = try Data(contentsOf: URL(fileURLWithPath: session.weightsPath))
+            guard WeightMetadata(data)?.kind == .speech else {
+                throw NeedleError.invalidInput("weights are not a recognized speech model")
+            }
+            let blob = NSData(data: data)
+            let code = api.load(blob.bytes, UInt64(blob.length))
+            guard code >= 0 else {
+                speechWeights = nil
+                throw api.failure("load speech weights", code: code)
+            }
+            speechBlob = blob
+            speechWeights = session.weightsPath
+        }
+        return api
+    }
+
+    func transcribe(_ session: SpeechSession, pcm: [Float], options: AudioOptions) throws -> Transcript {
+        try Task.checkCancellation()
+        let api = try bindSpeech(session)
+        guard let transcribe = api.transcribe else { throw NeedleError.native("engine does not support speech") }
+        var buffer = [CChar](repeating: 0, count: session.bufferSize)
+        let samples = pcm.isEmpty ? [Float(0)] : pcm
+        let code = samples.withUnsafeBufferPointer { samples in
+            // The audio ABI requires nonnull PCM even for an empty clip.
+            let clip = UnsafeBufferPointer(start: samples.baseAddress, count: pcm.count)
+            return buffer.withUnsafeMutableBufferPointer { transcribe(clip, options, $0) }
+        }
+        try Task.checkCancellation()
+        return try JSONDecoder().decode(Transcript.self, from: api.output("transcribe", code: code, buffer: buffer))
+    }
+
+    func completeSpeech(
+        _ session: SpeechSession, text: Session, pcm: [Float], options: AudioOptions, tokens: Int32
+    ) throws -> Response {
+        try Task.checkCancellation()
+        let api = try bindSpeech(session)
+        try bind(text)
+        guard let complete = api.completeAudio, let setAudio = api.setAudio else {
+            throw NeedleError.native("engine does not support speech")
+        }
+        if text.stateless {
+            api.reset()
+        }
+        setAudio(options)
+        defer { setAudio(AudioOptions()) }
+        var buffer = [CChar](repeating: 0, count: text.bufferSize)
+        let samples = pcm.isEmpty ? [Float(0)] : pcm
+        let code = samples.withUnsafeBufferPointer { samples in
+            let clip = UnsafeBufferPointer(start: samples.baseAddress, count: pcm.count)
+            return buffer.withUnsafeMutableBufferPointer { complete(clip, tokens, $0) }
+        }
+        try Task.checkCancellation()
+        // Decode/copy the native error before deferred audio-option cleanup can replace it.
+        return try decodeResponse(text, api: api, code: code, buffer: buffer)
     }
 
     @discardableResult

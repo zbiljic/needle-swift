@@ -58,6 +58,11 @@ public struct Response: Codable, Sendable, Equatable {
     public var peakRAMMB: Double?
     public var results: [JSONValue]?
     public var validation: Validation?
+    public var audioText: String?
+    public var audioLanguage: String?
+    public var audioWords: [WordTimestamp]?
+    public var audioTTFTMS: Double?
+    public var audioDecodeTPS: Double?
 
     enum CodingKeys: String, CodingKey {
         case type, success, error, reasoning, confidence, results, validation
@@ -67,6 +72,11 @@ public struct Response: Codable, Sendable, Equatable {
         case prefillTPS = "prefill_tps"
         case decodeTPS = "decode_tps"
         case peakRAMMB = "peak_ram_mb"
+        case audioText = "audio_text"
+        case audioLanguage = "audio_language"
+        case audioWords = "audio_words"
+        case audioTTFTMS = "audio_ttft_ms"
+        case audioDecodeTPS = "audio_decode_tps"
     }
 
     public init(type: String, functionCalls: [FunctionCall] = [], validation: Validation? = nil) {

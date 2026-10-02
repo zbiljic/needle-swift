@@ -56,16 +56,11 @@ public final class Agent: Sendable {
         handlers = Dictionary(uniqueKeysWithValues: configuration.tools.compactMap { tool in
             tool.handler.map { (tool.schema.name, $0) }
         })
-        let override = prepared.libraryOverride(configuration.libraryPath)
-        let library: URL
-        if let override, !override.isEmpty {
-            try validateCString(override, name: "library path")
-            library = URL(fileURLWithPath: override).standardizedFileURL
-        } else {
-            library = try await Engine.fetchLibrary(
-                generation: prepared.generation, cacheDirectory: configuration.cacheDirectory
-            )
-        }
+        let library = try await Engine.resolveLibrary(
+            generation: prepared.generation,
+            path: configuration.libraryPath,
+            cacheDirectory: configuration.cacheDirectory
+        )
         if prepared.generation == 3, !prepared.tuned {
             prepared.weightsPath = try await Engine.fetchBaseWeights(cacheDirectory: configuration.cacheDirectory).path
         }
@@ -80,12 +75,17 @@ public final class Agent: Sendable {
     }
 
     private func complete(_ text: String, maxNewTokens: Int, reset: Bool) async throws -> Response {
-        let tokens = maxNewTokens == 0 ? Self.defaultMaxNewTokens : maxNewTokens
+        let tokens = try Self.tokens(maxNewTokens)
+        try validateCString(text, name: "input")
+        return try await runtime.complete(session, text: text, tokens: tokens, reset: reset)
+    }
+
+    static func tokens(_ maxNewTokens: Int) throws -> Int32 {
+        let tokens = maxNewTokens == 0 ? defaultMaxNewTokens : maxNewTokens
         guard tokens > 0, tokens <= Int(Int32.max) else {
             throw NeedleError.invalidInput("invalid max new tokens \(maxNewTokens)")
         }
-        try validateCString(text, name: "input")
-        return try await runtime.complete(session, text: text, tokens: Int32(tokens), reset: reset)
+        return Int32(tokens)
     }
 
     /// Runs up to `maxSteps` tool rounds. A validation error carries the rejected
@@ -182,14 +182,6 @@ struct Session: Sendable {
             ?? EngineRelease(config.generation).generation
         toolIndexPath = config.toolIndexPath.flatMap { $0.isEmpty ? nil : $0 }
         bufferSize = config.bufferSize
-    }
-
-    func libraryOverride(
-        _ path: String?,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> String? {
-        [path, environment["NEEDLE\(generation)_LIB_PATH"], generation == 2 ? environment["NEEDLE_LIB_PATH"] : nil]
-            .compactMap(\.self).first { !$0.isEmpty }
     }
 }
 

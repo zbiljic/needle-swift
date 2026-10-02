@@ -13,6 +13,7 @@ It provides:
 - typed Swift tool handlers
 - structured response extraction
 - Needle 3 text embeddings
+- opt-in Whistle transcription and audio tool calling
 
 > This project is in early development and its API may change.
 
@@ -154,6 +155,15 @@ The base model exposes confidence-head probe features, rather than a trained
 contrastive retrieval head. Evaluate similarity on your own data before using
 these vectors for search. This API does not enable automatic tool retrieval.
 
+## Speech
+
+`Whistle` adds optional speech transcription and audio tool calling with
+Needle 3. It accepts 16 kHz mono `[Float]` PCM, up to 30 seconds. Speech weights
+are downloaded only when requested.
+
+See the [speech guide](docs/speech.md) for the API, supported languages, runtime
+behavior, and offline setup.
+
 ## Model generations
 
 Needle **3** is the default (`generation: 0` also selects 3). Select Needle 2
@@ -226,7 +236,7 @@ mise run setup          # Install pinned tools
 mise run                # List available tasks
 mise run fmt            # Format Swift source
 mise run check          # Formatting, lint, and offline tests
-mise run test:native    # Downloads and tests both real engines
+mise run test:native    # Both engines, embeddings, and Whistle speech
 mise run clean          # Remove package build artifacts
 swift build -c release
 ```

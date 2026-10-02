@@ -6,7 +6,7 @@ private struct WeatherArguments: Codable, Sendable, Equatable {
     let city: String
 }
 
-private let weatherSchema = ToolSchema(
+let weatherSchema = ToolSchema(
     name: "get_weather",
     description: "Get the current weather for a city.",
     parameters: [
@@ -273,9 +273,9 @@ func generationSelectionOverridesAndWeightReloads() async throws {
         var base = try Session(Configuration(generation: generation))
         let tuned = try Session(Configuration(generation: 5 - generation, weightsPath: weights.path))
         #expect(tuned.generation == generation)
-        #expect(base.libraryOverride(nil, environment: environment) == "/v\(generation)")
-        #expect(base.libraryOverride("/explicit", environment: environment) == "/explicit")
-        #expect(base.libraryOverride("", environment: ["NEEDLE_LIB_PATH": "/legacy"])
+        #expect(Engine.libraryOverride(nil, generation: generation, environment: environment) == "/v\(generation)")
+        #expect(Engine.libraryOverride("/explicit", generation: generation, environment: environment) == "/explicit")
+        #expect(Engine.libraryOverride("", generation: generation, environment: ["NEEDLE_LIB_PATH": "/legacy"])
             == (generation == 2 ? "/legacy" : nil))
         let fake = FakeNative([finalResponse, finalResponse, finalResponse], loadCode: 1)
         let runtime = NativeRuntime(api: fake.api)

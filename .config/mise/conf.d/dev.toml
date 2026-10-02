@@ -25,7 +25,7 @@ description = "Run offline tests"
 run = "swift test"
 
 [tasks."test:native"]
-description = "Download both pinned engines and run native integration tests"
+description = "Test both pinned engines, text embeddings and Whistle speech"
 env.NEEDLE_NATIVE_TEST = "1"
 run = "swift test --filter NativeIntegrationTests"
 

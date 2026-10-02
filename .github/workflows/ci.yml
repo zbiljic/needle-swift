@@ -34,5 +34,5 @@ jobs:
       - name: Build release
         run: swift build -c release
 
-      - name: Test Needle 2 and Needle 3 together
+      - name: Test Needle generations, embeddings, and speech
         run: mise run test:native

@@ -61,6 +61,50 @@ public enum Engine {
         return try NativeRuntime.weightsGeneration(file.read(upToCount: 4) ?? Data())
     }
 
+    static func libraryOverride(
+        _ path: String?,
+        generation: Int,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        [path, environment["NEEDLE\(generation)_LIB_PATH"], generation == 2 ? environment["NEEDLE_LIB_PATH"] : nil]
+            .compactMap(\.self).first { !$0.isEmpty }
+    }
+
+    static func resolveLibrary(generation: Int, path: String?, cacheDirectory: URL?) async throws -> URL {
+        if let override = libraryOverride(path, generation: generation) {
+            try validateCString(override, name: "library path")
+            return URL(fileURLWithPath: override).standardizedFileURL
+        }
+        return try await fetchLibrary(generation: generation, cacheDirectory: cacheDirectory)
+    }
+
+    /// Prepares the engine and speech weights for offline use, without fetching text weights.
+    public static func fetchWhistle(
+        platform: Platform = .current, cacheDirectory: URL? = nil, session: URLSession = .shared
+    ) async throws -> URL {
+        let library = try await fetchLibrary(
+            generation: 3, platform: platform, cacheDirectory: cacheDirectory, session: session
+        )
+        _ = try await fetchSpeechWeights(platform: platform, cacheDirectory: cacheDirectory, session: session)
+        return library
+    }
+
+    static func fetchSpeechWeights(
+        platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
+    ) async throws -> URL {
+        try await EngineDownloads.shared.fetch(
+            artifact: speechWeights,
+            directory: directory(release: EngineRelease(3), platform: platform, override: cacheDirectory),
+            session: session
+        )
+    }
+
+    static let speechWeights = EngineArtifact(
+        name: "whistle.cact",
+        url: "https://huggingface.co/Cactus-Compute/whistle/resolve/b358ddadd89b7a713b5aa131f23032d3cca1b251/whistle.cact",
+        checksum: "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb"
+    )
+
     static func fetchLibrary(
         generation: Int, platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
     ) async throws -> URL {

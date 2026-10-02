@@ -148,3 +148,27 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
         await #expect(throws: NeedleError.self) { try await Engine.fetch(generation: generation) }
     }
 }
+
+@Test
+func whistleFetchUsesVerifiedCacheWithoutTextWeights() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try EngineRelease(3).library(platform: .current)
+    for artifact in [library, Engine.speechWeights] {
+        let target = directory.appendingPathComponent(artifact.name)
+        let data = artifact.name == "whistle.cact" ? testWeights(speech: true) : Data("library".utf8)
+        try data.write(to: target)
+        try "\(artifact.checksum)\n\(Engine.digest(data))\n".write(
+            to: target.appendingPathExtension("sha256"), atomically: true, encoding: .utf8
+        )
+    }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StubProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    #expect(try await Engine.fetchWhistle(cacheDirectory: directory, session: session)
+        == directory.appendingPathComponent(library.name))
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("needle3.cact").path))
+    #expect(Engine.speechWeights.url.contains("/Cactus-Compute/whistle/resolve/"))
+}
