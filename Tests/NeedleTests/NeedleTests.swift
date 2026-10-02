@@ -17,7 +17,7 @@ private let weatherSchema = ToolSchema(
 )
 
 /// Test state is shared by @Sendable native callbacks and assertions, always under the lock.
-private final class FakeNative: @unchecked Sendable {
+final class FakeNative: @unchecked Sendable {
     private let lock = NSLock()
     private var responses: [String]
     private var inputs: [String] = []
@@ -266,7 +266,7 @@ func generationSelectionOverridesAndWeightReloads() async throws {
     let environment = ["NEEDLE2_LIB_PATH": "/v2", "NEEDLE3_LIB_PATH": "/v3", "NEEDLE_LIB_PATH": "/legacy"]
     for generation in [2, 3] {
         let weights = directory.appendingPathComponent("v\(generation).cact")
-        let header = Data([generation == 2 ? 0x83 : 0x84, 0x2A, 0xE1, 0x05, 1])
+        let header = generation == 2 ? Data([0x83, 0x2A, 0xE1, 0x05, 1]) : testWeights()
         try header.write(to: weights)
         #expect(try Engine.weightsGeneration(at: weights.path) == generation)
         var base = try Session(Configuration(generation: generation))
@@ -374,7 +374,7 @@ struct NativeIntegrationTests {
         try FileManager.default.copyItem(atPath: basePath, toPath: customPath.path)
         let custom = try await Agent(configuration: Configuration(generation: 2, weightsPath: customPath.path))
         #expect(custom.session.generation == 3)
-        #expect(try await custom.complete("hello").confidence == nil)
+        #expect(try await custom.complete("hello").confidence != nil)
         try await agents[1].reset()
         #expect(try await agents[1].complete("What is the weather in Lagos?").confidence != nil)
     }

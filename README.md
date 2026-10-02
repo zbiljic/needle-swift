@@ -123,8 +123,11 @@ let agent = try await Agent(configuration: Configuration(generation: 2))
 `weightsPath` accepts Needle 2 or Needle 3 `.cact` files. The file header selects
 the generation, overriding `Configuration.generation`. You can inspect it with
 `Engine.weightsGeneration(at:)`; this checks the header, not the full archive.
-Supplying custom weights sets `confidence` to `nil`, even for base weights.
-Automatically downloaded Needle 3 base weights retain confidence.
+Custom Needle 3 archives retain `confidence` when their metadata contains a
+recognized confidence head, including platform fine-tunes and the published
+base archive. Custom Needle 2 weights and text archives without a valid head
+report `nil`. Wrong-kind and unknown-kind Needle 3 archives are rejected before
+loading; the native engine validates the remaining model data.
 
 Both generations can run in the same process, each with **one global
 conversation**. Within a generation, switching agents resets the conversation;

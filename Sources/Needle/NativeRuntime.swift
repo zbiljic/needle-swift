@@ -96,6 +96,7 @@ actor NativeRuntime {
     private var activeID: UUID?
     private var activeWeights: String?
     private var weightsBlob: NSData?
+    private var calibratedWeights = false
     private var initializationStorage: [NSData] = []
 
     init(api: NativeAPI? = nil) {
@@ -131,7 +132,7 @@ actor NativeRuntime {
         guard end != nil else { throw NeedleError.native("engine response exceeds buffer") }
         var response = try JSONDecoder().decode(Response.self, from: Data(bytes))
         guard !response.type.isEmpty else { throw NeedleError.native("response type is empty") }
-        if session.tuned {
+        if session.tuned, !calibratedWeights {
             response.confidence = nil
         }
         return response
@@ -158,12 +159,17 @@ actor NativeRuntime {
                 throw NeedleError
                     .invalidInput("weights generation changed: got \(generation), want \(session.generation)")
             }
+            let metadata = WeightMetadata(data)
+            guard generation != 3 || metadata?.kind == .text else {
+                throw NeedleError.invalidInput("weights are not a recognized text model")
+            }
             let blob = NSData(data: data)
             let code = api.load(blob.bytes, UInt64(blob.length))
             guard code >= 0 else { throw api.failure("load weights", code: code) }
             // NSData supplies a stable allocation for engines that retain the weight pointer.
             weightsBlob = blob
             activeWeights = path
+            calibratedWeights = generation == 3 && metadata?.hasConfidenceHead == true
         }
         activeID = nil
         let storage = ([session.system, session.tools] + [session.toolIndexPath].compactMap(\.self))
