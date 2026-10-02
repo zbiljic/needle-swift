@@ -26,7 +26,7 @@ jobs:
         run: sudo xcode-select --switch /Applications/Xcode_26.6.app/Contents/Developer
 
       - name: Set up mise
-        uses: jdx/mise-action@v4
+        uses: jdx/mise-action@v5
 
       - name: Run checks
         run: mise run check
