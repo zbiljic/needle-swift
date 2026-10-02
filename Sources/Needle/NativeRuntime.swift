@@ -116,9 +116,12 @@ actor NativeRuntime {
         try bind(session)
     }
 
-    func complete(_ session: Session, text: String, tokens: Int32) throws -> Response {
+    func complete(_ session: Session, text: String, tokens: Int32, reset: Bool = false) throws -> Response {
         try Task.checkCancellation()
         let api = try bind(session)
+        if reset {
+            api.reset()
+        }
         var buffer = [CChar](repeating: 0, count: session.bufferSize)
         let code = buffer.withUnsafeMutableBufferPointer { api.complete(text, tokens, $0) }
         // Cancellation cannot interrupt the native ABI; observe it when inference returns.

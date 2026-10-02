@@ -62,10 +62,11 @@ final class FakeNative: @unchecked Sendable {
         )
     }
 
-    func agent(tools: [Tool] = [], bufferSize: Int = 65536) async throws -> Agent {
+    func agent(tools: [Tool] = [], bufferSize: Int = 65536, stateless: Bool = false) async throws -> Agent {
         try await Agent(
             configuration: Configuration(
                 tools: tools,
+                stateless: stateless,
                 generation: 2,
                 bufferSize: bufferSize,
                 libraryPath: "/test/libneedle.dylib"
@@ -323,6 +324,29 @@ func suppressedCallsArePreservedWithoutExecution() async throws {
     #expect(response.results?.isEmpty == true)
     #expect(await invocations.value == 0)
     #expect(try JSONDecoder().decode(Response.self, from: JSONEncoder().encode(response)) == response)
+}
+
+@Test(arguments: [false, true])
+func statelessResetsOnlyAtRequestBoundaries(stateless: Bool) async throws {
+    let fake = FakeNative([weatherCall, finalResponse, finalResponse, finalResponse])
+    let tool = Tool(schema: weatherSchema) { (arguments: WeatherArguments) in arguments.city }
+    let agent = try await fake.agent(tools: [tool], stateless: stateless)
+    #expect(try await agent.run("weather").results == [.string("Lagos")])
+    #expect(fake.snapshot.resets == (stateless ? 1 : 0))
+    _ = try await agent.complete("another request")
+    _ = try await agent.run("last request")
+    #expect(fake.snapshot.inputs.count == 4)
+    #expect(fake.snapshot.resets == (stateless ? 3 : 0))
+    await #expect(throws: NeedleError.self) { try await agent.complete("bad\0input") }
+    await #expect(throws: NeedleError.self) { try await agent.complete("hello", maxNewTokens: -1) }
+    await #expect(throws: NeedleError.self) { try await agent.run("hello", maxSteps: -1) }
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await agent.complete("hello")
+    }
+    await #expect(throws: CancellationError.self) { try await cancelled.value }
+    #expect(fake.snapshot.resets == (stateless ? 3 : 0))
+    #expect(try Session(Configuration()).stateless == false)
 }
 
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["NEEDLE_NATIVE_TEST"] == "1"))

@@ -111,6 +111,20 @@ remain available on `Response`.
 Task cancellation is checked before and after inference and between tool calls.
 It cannot interrupt native inference already in progress.
 
+## Independent requests
+
+Agents retain conversation context by default. Set `stateless: true` for
+independent requests:
+
+```swift
+let agent = try await Agent(configuration: Configuration(tools: [weather], stateless: true))
+```
+
+Each `complete` or `run` starts with a fresh conversation. `run` retains context
+between its tool rounds. Keep the default stateful mode for manual tool loops
+that feed results back through `complete`, and call `reset` between independent
+queries.
+
 ## Model generations
 
 Needle **3** is the default (`generation: 0` also selects 3). Select Needle 2

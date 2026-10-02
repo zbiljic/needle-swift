@@ -3,6 +3,8 @@ import Foundation
 public struct Configuration: Sendable {
     public var tools: [Tool]
     public var system: String
+    /// Reset once before each complete/run request; tool rounds retain context.
+    public var stateless: Bool
     /// Selects 2 or 3; zero defaults to 3. Custom weights take precedence.
     public var generation: Int
     public var weightsPath: String?
@@ -15,6 +17,7 @@ public struct Configuration: Sendable {
     public init(
         tools: [Tool] = [],
         system: String = "",
+        stateless: Bool = false,
         generation: Int = 3,
         weightsPath: String? = nil,
         toolIndexPath: String? = nil,
@@ -24,6 +27,7 @@ public struct Configuration: Sendable {
     ) {
         self.tools = tools
         self.system = system
+        self.stateless = stateless
         self.generation = generation
         self.weightsPath = weightsPath
         self.toolIndexPath = toolIndexPath
@@ -72,12 +76,16 @@ public final class Agent: Sendable {
 
     /// Raw inference; does not apply engine validation warnings or execute tools.
     public func complete(_ text: String, maxNewTokens: Int = defaultMaxNewTokens) async throws -> Response {
+        try await complete(text, maxNewTokens: maxNewTokens, reset: session.stateless)
+    }
+
+    private func complete(_ text: String, maxNewTokens: Int, reset: Bool) async throws -> Response {
         let tokens = maxNewTokens == 0 ? Self.defaultMaxNewTokens : maxNewTokens
         guard tokens > 0, tokens <= Int(Int32.max) else {
             throw NeedleError.invalidInput("invalid max new tokens \(maxNewTokens)")
         }
         try validateCString(text, name: "input")
-        return try await runtime.complete(session, text: text, tokens: Int32(tokens))
+        return try await runtime.complete(session, text: text, tokens: Int32(tokens), reset: reset)
     }
 
     /// Runs up to `maxSteps` tool rounds. A validation error carries the rejected
@@ -103,7 +111,11 @@ public final class Agent: Sendable {
                 executed.append(result)
             }
             let payload = try JSONEncoder().encode(results)
-            response = try await complete(String(decoding: payload, as: UTF8.self), maxNewTokens: maxNewTokens)
+            response = try await complete(
+                String(decoding: payload, as: UTF8.self),
+                maxNewTokens: maxNewTokens,
+                reset: false
+            )
             response.results = executed
             try response.validate()
         }
@@ -138,6 +150,7 @@ struct Session: Sendable {
     let tools: String
     let generation: Int
     let tuned: Bool
+    let stateless: Bool
     var weightsPath: String?
     let toolIndexPath: String?
     let bufferSize: Int
@@ -156,6 +169,7 @@ struct Session: Sendable {
         try validateCString(config.toolIndexPath ?? "", name: "tool index path")
         try validateCString(config.weightsPath ?? "", name: "weights path")
         system = config.system
+        stateless = config.stateless
         tools = try String(decoding: JSONEncoder().encode(config.tools.map(\.schema)), as: UTF8.self)
         weightsPath = config.weightsPath.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0).standardized.path }
         tuned = weightsPath != nil
