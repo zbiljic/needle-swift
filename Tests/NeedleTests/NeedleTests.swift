@@ -349,6 +349,28 @@ func statelessResetsOnlyAtRequestBoundaries(stateless: Bool) async throws {
     #expect(try Session(Configuration()).stateless == false)
 }
 
+@Test
+func toolTriggersRoundTripAndReachNativeInitialization() async throws {
+    let schema = ToolSchema(name: "weather", triggers: [#"\bweather\b"#, #"\bforecast\b"#])
+    let data = try JSONEncoder().encode(schema)
+    #expect(try JSONDecoder().decode(ToolSchema.self, from: data) == schema)
+    let plain = try JSONEncoder().encode(ToolSchema(name: "weather"))
+    #expect(!String(decoding: plain, as: UTF8.self).contains("triggers"))
+    #expect(try JSONDecoder().decode(ToolSchema.self, from: plain).triggers == nil)
+    let api = NativeAPI(
+        initialize: { _, tools, _ in
+            let data = Data(String(cString: tools).utf8)
+            #expect((try? JSONDecoder().decode([ToolSchema].self, from: data)) == [schema])
+            return 0
+        },
+        complete: { _, _, _ in 0 },
+        reset: {},
+        load: { _, _ in 0 }
+    )
+    let session = try Session(Configuration(tools: [Tool(schema: schema)], generation: 2))
+    try await NativeRuntime(api: api).initialize(session, library: URL(fileURLWithPath: "/test/libneedle.dylib"))
+}
+
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["NEEDLE_NATIVE_TEST"] == "1"))
 struct NativeIntegrationTests {
     @Test

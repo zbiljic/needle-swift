@@ -4,15 +4,19 @@ public struct ToolSchema: Codable, Sendable, Equatable {
     public var name: String
     public var description: String
     public var parameters: [String: JSONValue]
+    /// Native case-insensitive regex routing; matches can bypass the engine confidence floor.
+    public var triggers: [String]?
 
     public init(
         name: String,
         description: String = "",
-        parameters: [String: JSONValue] = ["type": .string("object"), "properties": .object([:])]
+        parameters: [String: JSONValue] = ["type": .string("object"), "properties": .object([:])],
+        triggers: [String]? = nil
     ) {
         self.name = name
         self.description = description
         self.parameters = parameters
+        self.triggers = triggers
     }
 }
 

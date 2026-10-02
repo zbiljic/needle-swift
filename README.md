@@ -111,6 +111,18 @@ remain available on `Response`.
 Task cancellation is checked before and after inference and between tool calls.
 It cannot interrupt native inference already in progress.
 
+## Tool triggers
+
+Set `ToolSchema.triggers` to opt into native, case-insensitive regex routing:
+
+```swift
+let schema = ToolSchema(name: "get_weather", triggers: [#"\bweather\b"#, #"\bforecast\b"#])
+```
+
+Use your tool's full parameter schema alongside the triggers. Matching triggers
+can bypass the engine's confidence floor; response validation and application
+confidence policies still apply. Patterns are interpreted by the native engine.
+
 ## Independent requests
 
 Agents retain conversation context by default. Set `stateless: true` for
