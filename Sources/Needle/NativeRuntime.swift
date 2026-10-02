@@ -13,6 +13,10 @@ struct NativeAPI: Sendable {
     ) -> Int32
     typealias Reset = @convention(c) () -> Void
     typealias Load = @convention(c) (UnsafeRawPointer?, UInt64) -> Int32
+    typealias Embed = @convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<Float>?, Int32) -> Int32
+    typealias EmbedWithAudio = @convention(c) (
+        UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32, UnsafeMutablePointer<Float>?, Int32
+    ) -> Int32
 
     let initialize: @Sendable (UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Int32
     let complete: @Sendable (String, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
@@ -20,6 +24,7 @@ struct NativeAPI: Sendable {
     let load: @Sendable (UnsafeRawPointer, UInt64) -> Int32
 
     var lastError: (@Sendable () -> String?)?
+    var embed: (@Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32)?
 
     static func open(_ path: String) throws -> Self {
         guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
@@ -71,7 +76,23 @@ struct NativeAPI: Sendable {
             let function = unsafeBitCast(address, to: (@convention(c) () -> UnsafePointer<CChar>?).self)
             api.lastError = { function().map { String(cString: $0) } }
         }
+        api.bindEmbedding(resolve("needle_embed"), modern: modern)
         return api
+    }
+
+    private mutating func bindEmbedding(_ address: UnsafeMutableRawPointer?, modern: Bool) {
+        guard let address else { return }
+        if modern {
+            let function = unsafeBitCast(address, to: EmbedWithAudio.self)
+            embed = { text, output in
+                text.withCString { function($0, nil, 0, output.baseAddress, Int32(output.count)) }
+            }
+        } else {
+            let function = unsafeBitCast(address, to: Embed.self)
+            embed = { text, output in
+                text.withCString { function($0, output.baseAddress, Int32(output.count)) }
+            }
+        }
     }
 
     /// Read the process-global error before any other native call can replace it.
@@ -144,6 +165,25 @@ actor NativeRuntime {
     func reset(_ session: Session) throws {
         try Task.checkCancellation()
         try bind(session).reset()
+    }
+
+    func embed(_ session: Session, text: String) throws -> [Float] {
+        try Task.checkCancellation()
+        guard session.generation == 3 else { throw NeedleError.invalidInput("embeddings require Needle 3") }
+        try validateCString(text, name: "input")
+        let api = try bind(session)
+        guard let embed = api.embed else { throw NeedleError.native("engine does not support embeddings") }
+        let size = embed(text, UnsafeMutableBufferPointer(start: nil, count: 0))
+        guard size >= 0 else { throw api.failure("embed size", code: size) }
+        // ponytail: cap vectors at 4 MiB; raise if a future model needs wider features.
+        guard size > 0, size <= 1 << 20 else { throw NeedleError.native("invalid embedding size \(size)") }
+        try Task.checkCancellation()
+        var output = [Float](repeating: 0, count: Int(size))
+        let code = output.withUnsafeMutableBufferPointer { embed(text, $0) }
+        try Task.checkCancellation()
+        guard code >= 0 else { throw api.failure("embed", code: code) }
+        guard code == size else { throw NeedleError.native("embedding length \(code), want \(size)") }
+        return output
     }
 
     @discardableResult

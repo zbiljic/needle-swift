@@ -12,6 +12,7 @@ It provides:
 - high-level and manual completion loops
 - typed Swift tool handlers
 - structured response extraction
+- Needle 3 text embeddings
 
 > This project is in early development and its API may change.
 
@@ -136,6 +137,22 @@ Each `complete` or `run` starts with a fresh conversation. `run` retains context
 between its tool rounds. Keep the default stateful mode for manual tool loops
 that feed results back through `complete`, and call `reset` between independent
 queries.
+
+## Text embeddings
+
+Needle 3 exposes text features as `[Float]`:
+
+```swift
+let vector = try await agent.embed("turn on the kitchen lights")
+```
+
+`embed` preserves the conversation, including in stateless mode. Switching
+agents follows the conversation rules below. Needle 2 and engines without
+`needle_embed` return an error; legacy and audio-capable Needle 3 ABIs work.
+
+The base model exposes confidence-head probe features, rather than a trained
+contrastive retrieval head. Evaluate similarity on your own data before using
+these vectors for search. This API does not enable automatic tool retrieval.
 
 ## Model generations
 

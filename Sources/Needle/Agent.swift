@@ -126,6 +126,11 @@ public final class Agent: Sendable {
         try await runtime.reset(session)
     }
 
+    /// Needle 3 text features. Does not reset the conversation, including in stateless mode.
+    public func embed(_ text: String) async throws -> [Float] {
+        try await runtime.embed(session, text: text)
+    }
+
     private func execute(_ call: FunctionCall) async throws -> JSONValue {
         guard let handler = handlers[call.name] else {
             return .object(["error": .string("unknown tool: \(call.name)")])

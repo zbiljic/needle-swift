@@ -374,6 +374,24 @@ func toolTriggersRoundTripAndReachNativeInitialization() async throws {
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["NEEDLE_NATIVE_TEST"] == "1"))
 struct NativeIntegrationTests {
     @Test
+    func nativeEmbeddingsPreserveContinuation() async throws {
+        let agent = try await Agent(configuration: Configuration(tools: [Tool(schema: weatherSchema)]))
+        let text = "What is the weather in Lagos?"
+        let first = try await agent.embed(text)
+        #expect(!first.isEmpty && first.allSatisfy(\.isFinite))
+        #expect(try await agent.embed(text) == first)
+        try await agent.reset()
+        _ = try await agent.complete(text)
+        let baseline = try await agent.complete(#"["Clear in Lagos"]"#)
+        try await agent.reset()
+        _ = try await agent.complete(text)
+        _ = try await agent.embed("another text")
+        let continued = try await agent.complete(#"["Clear in Lagos"]"#)
+        #expect(continued.type == baseline.type)
+        #expect(continued.functionCalls == baseline.functionCalls)
+    }
+
+    @Test
     func nativeInitializationDiagnostic() async throws {
         do {
             _ = try await Agent(configuration: Configuration(system: String(repeating: "long context ", count: 10000)))
