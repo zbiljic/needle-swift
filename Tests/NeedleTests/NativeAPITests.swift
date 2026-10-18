@@ -6,6 +6,26 @@ func address(_ function: some Any) -> UnsafeMutableRawPointer {
     unsafeBitCast(function, to: UnsafeMutableRawPointer.self)
 }
 
+/// The streaming pair introduced with engine 3.2, checking the six-argument process ABI.
+private func streamSymbols() -> [String: UnsafeMutableRawPointer] {
+    let streamProcess: NativeAPI.StreamProcess = { pcm, count, language, keywords, output, capacity in
+        guard
+            let pcm, pcm[0] == 0.25, count == 2, let language, String(cString: language) == "en",
+            let keywords, String(cString: keywords) == "Paris\nAda", capacity == 32 else { return -1 }
+        output?[0] = 67
+        return 3
+    }
+    let streamStop: NativeAPI.StreamStop = { output, capacity in
+        guard capacity == 32 else { return -1 }
+        output?[0] = 68
+        return 0
+    }
+    return [
+        "needle_stream_transcribe_process": address(streamProcess),
+        "needle_stream_transcribe_stop": address(streamStop),
+    ]
+}
+
 func nativeSymbols(modern: Bool) -> [String: UnsafeMutableRawPointer] {
     let initialize: NativeAPI.Initialize = { _, _, _ in 12 }
     let reset: NativeAPI.Reset = {}
@@ -52,6 +72,7 @@ func nativeSymbols(modern: Bool) -> [String: UnsafeMutableRawPointer] {
             symbols[name] = address(reset) // Capability probes only; these are not called here.
         }
         symbols["needle_last_error"] = address(lastError)
+        symbols.merge(streamSymbols()) { _, new in new }
     }
     return symbols
 }
@@ -78,6 +99,15 @@ func nativeCompletionABI(modern: Bool) throws {
             #expect(throws: NeedleError.self) { try NativeAPI.bind { symbols[$0] } }
         }
         symbols[name] = removed
+    }
+    #expect((api.streamProcess != nil) == modern && (api.streamStop != nil) == modern)
+    if modern {
+        // Engine 3.1 has speech without the streaming pair.
+        var older = symbols
+        older["needle_stream_transcribe_process"] = nil
+        older["needle_stream_transcribe_stop"] = nil
+        let engine31 = try NativeAPI.bind { older[$0] }
+        #expect(engine31.streamProcess == nil && engine31.streamStop == nil && engine31.transcribe != nil)
     }
 }
 

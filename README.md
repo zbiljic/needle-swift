@@ -13,7 +13,7 @@ It provides:
 - typed Swift tool handlers
 - structured response extraction
 - Needle 3 text embeddings
-- opt-in Whistle transcription and audio tool calling
+- opt-in Whistle transcription, live streaming, and audio tool calling
 
 > This project is in early development and its API may change.
 
@@ -139,6 +139,12 @@ between its tool rounds. Keep the default stateful mode for manual tool loops
 that feed results back through `complete`, and call `reset` between independent
 queries.
 
+## Closing
+
+`close` releases an agent's native binding; later calls throw
+`NeedleError.closed`. The engine and loaded weights stay in the process for
+other agents. `Whistle` has the same `close`, which also ends an open stream.
+
 ## Text embeddings
 
 Needle 3 exposes text features as `[Float]`:
@@ -157,8 +163,9 @@ these vectors for search. This API does not enable automatic tool retrieval.
 
 ## Speech
 
-`Whistle` adds optional speech transcription and audio tool calling with
-Needle 3. It accepts 16 kHz mono `[Float]` PCM of any length. Speech weights
+`Whistle` adds optional speech transcription, live streaming transcription,
+and audio tool calling with Needle 3. It accepts 16 kHz mono `[Float]` PCM of
+any length. Speech weights
 are downloaded only when requested.
 
 See the [speech guide](docs/speech.md) for the API, supported languages, runtime
@@ -230,7 +237,8 @@ verify checksums or check for base weights.
 
 Every failure is a `NeedleError`. Match its cases instead of its text:
 `invalidInput`, `unsupportedGeneration`, `unsupportedABI`, `embeddingUnsupported`,
-`speechUnsupported`, `download`, `native`, and `validation` (also thrown by `run`).
+`speechUnsupported`, `streamActive`, `closed`, `download`, `native`, and
+`validation` (also thrown by `run`).
 A failed engine call is `nativeFailure` with the operation, the native code, and
 any engine diagnostic.
 

@@ -126,6 +126,12 @@ public final class Agent: Sendable {
         try await runtime.reset(session)
     }
 
+    /// Releases the agent's native binding. Later calls throw `NeedleError.closed`.
+    /// The engine and loaded weights stay in the process for other agents.
+    public func close() async {
+        await runtime.close(session)
+    }
+
     /// Needle 3 text features. Does not reset the conversation, including in stateless mode.
     public func embed(_ text: String) async throws -> [Float] {
         try await runtime.embed(session, text: text)

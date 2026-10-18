@@ -142,9 +142,25 @@ public final class Whistle: Sendable {
             tokens: tokens
         )
     }
+
+    /// Prepares a live transcription with the language and keywords of `options`;
+    /// `wordTimestamps` is ignored because every step carries word times. Nothing
+    /// reaches the engine until the first `process`.
+    public func stream(options: AudioOptions = AudioOptions()) throws -> TranscriptionStream {
+        try options.validate([])
+        return TranscriptionStream(session: StreamSession(speech: session, options: options), runtime: runtime)
+    }
+
+    /// Ends an open stream of this Whistle and releases its binding. Later calls
+    /// throw `NeedleError.closed`. Loaded speech weights stay in the engine for
+    /// other Whistle values.
+    public func close() async {
+        await runtime.closeSpeech(session)
+    }
 }
 
 struct SpeechSession: Sendable {
+    let id = UUID()
     let weightsPath: String
     /// Output capacity for clips up to about a minute; longer clips grow it.
     let bufferSize: Int

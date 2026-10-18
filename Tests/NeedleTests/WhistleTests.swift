@@ -2,12 +2,13 @@ import Foundation
 @testable import Needle
 import Testing
 
-private final class SpeechProbe: @unchecked Sendable {
+final class SpeechProbe: @unchecked Sendable {
     let text = FakeNative()
     let mode: String
     private let lock = NSLock()
     private var settings: [AudioOptions] = []
     private var sizes: [Int] = []
+    private var events: [String] = []
     private var calls = 0
 
     init(mode: String = "ok") {
@@ -27,6 +28,11 @@ private final class SpeechProbe: @unchecked Sendable {
         lock.withLock { sizes }
     }
 
+    /// Stream calls as "process/<samples>/<first>/<language>/<keywords>/<capacity>" and "stop/<capacity>".
+    var streamEvents: [String] {
+        lock.withLock { events }
+    }
+
     var api: NativeAPI {
         var api = text.api
         api.setAudio = { value in self.lock.withLock { self.settings.append(value) } }
@@ -39,6 +45,27 @@ private final class SpeechProbe: @unchecked Sendable {
                 {"text":"Paris","language":"fr","ttft_ms":2,"decode_tps":3,
                  "words":[{"word":"Paris","start":0,"end":0.5,"probability":0.9}]}
                 """#,
+                to: output
+            )
+        }
+        api.streamProcess = { pcm, options, output in
+            let first = pcm.first.map { "\($0)" } ?? "-"
+            let keywords = options.keywords.joined(separator: ",")
+            self.lock.withLock {
+                self.events.append("process/\(pcm.count)/\(first)/\(options.language)/\(keywords)/\(output.count)")
+            }
+            return self.write(
+                #"""
+                {"text":"hello","words":[{"word":"hello","start":0.1,"end":0.4,"probability":0.9}],
+                 "pending":"there","language":"en","received":1,"pass_ms":12}
+                """#,
+                to: output
+            )
+        }
+        api.streamStop = { output in
+            self.lock.withLock { self.events.append("stop/\(output.count)") }
+            return self.write(
+                #"{"text":"there","words":[],"pending":"","language":"en","received":2,"pass_ms":3}"#,
                 to: output
             )
         }
@@ -72,7 +99,7 @@ private final class SpeechProbe: @unchecked Sendable {
     }
 }
 
-private func speechDirectory() throws -> URL {
+func speechDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     try testWeights(speech: true).write(to: directory.appendingPathComponent("speech.cact"))
@@ -256,6 +283,10 @@ func speechCABIArguments() throws {
         #expect(buffer[0] == 65)
         #expect(buffer.withUnsafeMutableBufferPointer { api.completeAudio?(pcm, 123, $0) } == 8)
         #expect(buffer[0] == 66)
+        #expect(buffer.withUnsafeMutableBufferPointer { api.streamProcess?(pcm, options, $0) } == 3)
+        #expect(buffer[0] == 67)
+        #expect(buffer.withUnsafeMutableBufferPointer { api.streamStop?($0) } == 0)
+        #expect(buffer[0] == 68)
     }
     api.setAudio?(AudioOptions())
 }
@@ -287,6 +318,18 @@ extension NativeIntegrationTests {
         let other = try await Agent(configuration: Configuration(system: "device: test"))
         _ = try await other.complete("hello")
         #expect(try await speech.transcribe([]).text.isEmpty)
+        // Live transcription: one-second chunks of silence, then the tail.
+        let live = try speech.stream(options: AudioOptions(language: "en"))
+        for _ in 0 ..< 3 {
+            let step = try await live.process([Float](repeating: 0, count: Whistle.sampleRate))
+            #expect(step.text.isEmpty && step.received > 0)
+        }
+        await #expect { try await speech.transcribe([]) } throws: {
+            $0.localizedDescription == NeedleError.streamActive.localizedDescription
+        }
+        let tail = try await live.stop()
+        #expect(tail.text.isEmpty && tail.pending.isEmpty)
+        #expect(try await speech.transcribe([]).text.isEmpty)
     }
 
     @Test
@@ -306,7 +349,7 @@ extension NativeIntegrationTests {
                 _ = try await other.transcribe([])
             }
             let response = try await agent.complete(#"["Clear in Lagos"]"#)
-            #expect(response.type == "respond")
+            #expect(response.type == "respond", "\(response)")
             if let baseline {
                 #expect(response.functionCalls == baseline.functionCalls)
                 #expect(response.reasoning == baseline.reasoning)

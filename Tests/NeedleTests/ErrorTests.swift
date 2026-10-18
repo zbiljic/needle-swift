@@ -12,6 +12,8 @@ private extension Error {
         case .speechUnsupported: "speechUnsupported"
         case .nativeFailure: "nativeFailure"
         case .native: "native"
+        case .streamActive: "streamActive"
+        case .closed: "closed"
         case .download: "download"
         case .validation: "validation"
         case nil: nil

@@ -15,6 +15,10 @@ struct NativeAPI: Sendable {
         UnsafePointer<Float>?, Int32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32,
         UnsafeMutablePointer<CChar>?, Int32
     ) -> Int32
+    typealias StreamProcess = @convention(c) (
+        UnsafePointer<Float>?, Int32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafeMutablePointer<CChar>?, Int32
+    ) -> Int32
+    typealias StreamStop = @convention(c) (UnsafeMutablePointer<CChar>?, Int32) -> Int32
     typealias SetAudio = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
     typealias Reset = @convention(c) () -> Void
     typealias Load = @convention(c) (UnsafeRawPointer?, UInt64) -> Int32
@@ -34,6 +38,13 @@ struct NativeAPI: Sendable {
     var transcribe: (@Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32)?
     var setAudio: (@Sendable (AudioOptions) -> Void)?
     var completeAudio: (@Sendable (UnsafeBufferPointer<Float>, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32)?
+    typealias StreamProcessCall = @Sendable (
+        UnsafeBufferPointer<Float>,
+        AudioOptions,
+        UnsafeMutableBufferPointer<CChar>
+    ) -> Int32
+    var streamProcess: StreamProcessCall?
+    var streamStop: (@Sendable (UnsafeMutableBufferPointer<CChar>) -> Int32)?
 
     static func open(_ path: String) throws -> Self {
         guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
@@ -92,6 +103,19 @@ struct NativeAPI: Sendable {
                 transcribe: symbol("needle_transcribe", as: Transcribe.self),
                 setAudio: symbol("needle_set_audio", as: SetAudio.self)
             )
+            // Streaming arrived with engine 3.2.0 as a pair of symbols.
+            let process = resolve("needle_stream_transcribe_process")
+            let stop = resolve("needle_stream_transcribe_stop")
+            if (process == nil) != (stop == nil) {
+                let missing = process == nil ? "needle_stream_transcribe_process" : "needle_stream_transcribe_stop"
+                throw NeedleError.unsupportedABI(missing: missing)
+            }
+            if let process, let stop {
+                api.bindStream(
+                    process: unsafeBitCast(process, to: StreamProcess.self),
+                    stop: unsafeBitCast(stop, to: StreamStop.self)
+                )
+            }
         }
         return api
     }
@@ -125,6 +149,15 @@ struct NativeAPI: Sendable {
             }
         }
         self.setAudio = { options in options.withCStringOptions { setAudio($0, $1, $2) } }
+    }
+
+    private mutating func bindStream(process: @escaping StreamProcess, stop: @escaping StreamStop) {
+        streamProcess = { pcm, options, output in
+            options.withCStringOptions { language, keywords, _ in
+                process(pcm.baseAddress, Int32(pcm.count), language, keywords, output.baseAddress, Int32(output.count))
+            }
+        }
+        streamStop = { output in stop(output.baseAddress, Int32(output.count)) }
     }
 
     func output(_ operation: String, code: Int32, buffer: [CChar]) throws -> Data {
@@ -167,6 +200,11 @@ actor NativeRuntime {
     private var speechWeights: String?
     private var speechBlob: NSData?
     private var initializationStorage: [NSData] = []
+    private var closedSessions: Set<UUID> = []
+    /// The open live transcription, which the engine holds one of.
+    private var openStream: StreamSession?
+    /// Streams ended by `closeSpeech` that have not yet observed the stop.
+    private var endedStreams: Set<UUID> = []
 
     init(api: NativeAPI? = nil) {
         self.api = api
@@ -216,6 +254,24 @@ actor NativeRuntime {
         try bind(session).reset()
     }
 
+    /// Releases a text session; later calls throw `NeedleError.closed`. The next
+    /// agent reinitializes the engine.
+    func close(_ session: Session) {
+        closedSessions.insert(session.id)
+        if activeID == session.id {
+            activeID = nil
+        }
+    }
+
+    /// Ends the session's open stream and releases the session; later calls throw `NeedleError.closed`.
+    func closeSpeech(_ session: SpeechSession) {
+        if let openStream, openStream.speech.id == session.id {
+            endStream(openStream)
+            endedStreams.insert(openStream.id)
+        }
+        closedSessions.insert(session.id)
+    }
+
     func embed(_ session: Session, text: String) throws -> [Float] {
         try Task.checkCancellation()
         guard session.generation == 3 else { throw NeedleError.embeddingUnsupported("embeddings require Needle 3") }
@@ -248,7 +304,10 @@ actor NativeRuntime {
         guard let api, api.transcribe != nil, api.setAudio != nil, api.completeAudio != nil else {
             throw NeedleError.speechUnsupported("engine does not support speech; use Needle 3.1 or newer")
         }
+        guard !closedSessions.contains(session.id) else { throw NeedleError.closed }
         if speechWeights != session.weightsPath {
+            // Switching speech weights would discard the open stream.
+            guard openStream == nil else { throw NeedleError.streamActive }
             let data = try Data(contentsOf: URL(fileURLWithPath: session.weightsPath))
             guard WeightMetadata(data)?.kind == .speech else {
                 throw NeedleError.invalidInput("weights are not a recognized speech model")
@@ -267,6 +326,7 @@ actor NativeRuntime {
 
     func transcribe(_ session: SpeechSession, pcm: [Float], options: AudioOptions) throws -> Transcript {
         try Task.checkCancellation()
+        guard openStream == nil else { throw NeedleError.streamActive }
         let api = try bindSpeech(session)
         guard let transcribe = api.transcribe else {
             throw NeedleError.speechUnsupported("engine does not support speech")
@@ -286,6 +346,7 @@ actor NativeRuntime {
         _ session: SpeechSession, text: Session, pcm: [Float], options: AudioOptions, tokens: Int32
     ) throws -> Response {
         try Task.checkCancellation()
+        guard openStream == nil else { throw NeedleError.streamActive }
         let api = try bindSpeech(session)
         try bind(text)
         guard let complete = api.completeAudio, let setAudio = api.setAudio else {
@@ -307,9 +368,79 @@ actor NativeRuntime {
         return try decodeResponse(text, api: api, code: code, buffer: buffer)
     }
 
+    func streamProcess(_ stream: StreamSession, pcm: [Float]) throws -> StreamTranscript {
+        try Task.checkCancellation()
+        let (api, process) = try bindStream(stream)
+        var buffer = [CChar](repeating: 0, count: stream.speech.outputCapacity(samples: pcm.count))
+        let samples = pcm.isEmpty ? [Float(0)] : pcm
+        let code = samples.withUnsafeBufferPointer { samples in
+            let chunk = UnsafeBufferPointer(start: samples.baseAddress, count: pcm.count)
+            return buffer.withUnsafeMutableBufferPointer { process(chunk, stream.options, $0) }
+        }
+        openStream = stream
+        let step: StreamTranscript
+        do {
+            step = try Self.decodeStep(api, "stream", code: code, buffer: buffer)
+        } catch {
+            // The engine's stream state is unknown after a failure; end it so
+            // other speech calls are not blocked.
+            endStream(stream)
+            throw StreamFailure(error)
+        }
+        try Task.checkCancellation()
+        return step
+    }
+
+    func streamStop(_ stream: StreamSession) throws -> StreamTranscript {
+        try Task.checkCancellation()
+        let (api, _) = try bindStream(stream)
+        guard let stop = api.streamStop else { throw Self.streamingUnsupported }
+        var buffer = [CChar](repeating: 0, count: stream.speech.bufferSize)
+        let code = buffer.withUnsafeMutableBufferPointer { stop($0) }
+        openStream = nil
+        do {
+            return try Self.decodeStep(api, "stream stop", code: code, buffer: buffer)
+        } catch {
+            throw StreamFailure(error)
+        }
+    }
+
+    private static let streamingUnsupported = NeedleError
+        .speechUnsupported("engine does not support live transcription; use Needle 3.2 or newer")
+
+    /// Checks that this stream may use the engine.
+    private func bindStream(_ stream: StreamSession) throws -> (NativeAPI, NativeAPI.StreamProcessCall) {
+        if endedStreams.remove(stream.id) != nil {
+            throw StreamFailure(TranscriptionStream.stoppedError)
+        }
+        if let openStream, openStream.id != stream.id {
+            throw NeedleError.streamActive
+        }
+        let api = try bindSpeech(stream.speech)
+        guard let process = api.streamProcess, api.streamStop != nil else { throw Self.streamingUnsupported }
+        return (api, process)
+    }
+
+    /// Stops the engine's stream without reporting its tail.
+    private func endStream(_ stream: StreamSession) {
+        guard openStream?.id == stream.id else { return }
+        if let stop = api?.streamStop {
+            var buffer = [CChar](repeating: 0, count: stream.speech.bufferSize)
+            _ = buffer.withUnsafeMutableBufferPointer { stop($0) }
+        }
+        openStream = nil
+    }
+
+    private static func decodeStep(
+        _ api: NativeAPI, _ operation: String, code: Int32, buffer: [CChar]
+    ) throws -> StreamTranscript {
+        try JSONDecoder().decode(StreamTranscript.self, from: api.output(operation, code: code, buffer: buffer))
+    }
+
     @discardableResult
     private func bind(_ session: Session) throws -> NativeAPI {
         guard let api else { throw NeedleError.native("engine is not loaded") }
+        guard !closedSessions.contains(session.id) else { throw NeedleError.closed }
         if activeID == session.id {
             return api
         }

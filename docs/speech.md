@@ -29,6 +29,28 @@ include `ttftMS`, `decodeTPS`, and optional words with start/end times in second
 and probabilities. File decoding, microphone capture, and resampling belong to
 the caller.
 
+## Live transcription
+
+`stream` transcribes as audio arrives. Feed about one second of PCM per
+`process` call; each step returns the words two consecutive passes agreed on,
+with times from the start of the stream, plus the unconfirmed `pending` tail.
+`stop` commits the tail and ends the stream.
+
+```swift
+let live = try speech.stream(options: AudioOptions(language: "en"))
+for chunk in chunks {
+    let step = try await live.process(chunk)
+    print(step.text, terminator: " ")
+}
+let tail = try await live.stop()
+```
+
+The engine holds one stream per process. While a stream is open, other speech
+calls, a second stream, and loading different speech weights throw
+`NeedleError.streamActive`; a failed `process` ends the stream, and `close` on
+its Whistle ends it too. Streaming needs engine 3.2 or newer; older libraries
+throw `NeedleError.speechUnsupported`.
+
 ## Audio tool calling
 
 To transcribe and produce tool calls in one native turn, pass a Needle 3 agent

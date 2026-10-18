@@ -18,6 +18,10 @@ public enum NeedleError: Error, LocalizedError, Sendable {
     case nativeFailure(operation: String, code: Int32, detail: String)
     /// Engine or library state reported by this library rather than by a native code.
     case native(String)
+    /// A live transcription is open on the engine; other speech calls wait for its `stop`.
+    case streamActive
+    /// The `Agent` or `Whistle` was closed.
+    case closed
     /// An engine or weights download could not be completed or verified.
     case download(String)
     /// The engine flagged negation or ungrounded fields. `run` throws this before
@@ -32,6 +36,10 @@ public enum NeedleError: Error, LocalizedError, Sendable {
             "needle: \(message)"
         case let .unsupportedABI(missing):
             "needle: unsupported native ABI: missing \(missing)"
+        case .streamActive:
+            "needle: a live transcription is in progress"
+        case .closed:
+            "needle: closed"
         case let .nativeFailure(operation, code, detail):
             "needle: \(operation) failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)")
         case let .validation(response):
