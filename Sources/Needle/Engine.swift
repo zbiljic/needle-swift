@@ -276,7 +276,7 @@ struct EngineRelease {
 
     init(_ generation: Int) throws {
         guard [0, 2, 3].contains(generation) else {
-            throw NeedleError.invalidInput("unsupported generation \(generation); want 2 or 3")
+            throw NeedleError.unsupportedGeneration("unsupported generation \(generation); want 2 or 3")
         }
         self.generation = generation == 0 ? 3 : generation
     }

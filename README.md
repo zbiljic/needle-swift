@@ -226,6 +226,14 @@ preserve the downloaded files and `.sha256` markers, and use the same cache
 directory at runtime. `Engine.cached` only locates the library; it does not
 verify checksums or check for base weights.
 
+## Errors
+
+Every failure is a `NeedleError`. Match its cases instead of its text:
+`invalidInput`, `unsupportedGeneration`, `unsupportedABI`, `embeddingUnsupported`,
+`speechUnsupported`, `download`, `native`, and `validation` (also thrown by `run`).
+A failed engine call is `nativeFailure` with the operation, the native code, and
+any engine diagnostic.
+
 ## Development
 
 Use Xcode's Swift 6.3+ toolchain and [mise](https://mise.jdx.dev/).

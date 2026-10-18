@@ -57,7 +57,7 @@ struct NativeAPI: Sendable {
         let modern = capabilities.contains { resolve($0) != nil }
         if modern {
             for name in capabilities + ["needle_last_error", "needle_embed"] where resolve(name) == nil {
-                throw NeedleError.native("unsupported native ABI: missing \(name)")
+                throw NeedleError.unsupportedABI(missing: name)
             }
         }
         let initialize = try symbol("needle_init", as: Initialize.self)
@@ -141,7 +141,7 @@ struct NativeAPI: Sendable {
     func failure(_ operation: String, code: Int32, fallback: String = "") -> NeedleError {
         let diagnostic = (lastError?() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let detail = diagnostic.isEmpty ? fallback.trimmingCharacters(in: .whitespacesAndNewlines) : diagnostic
-        return .native("\(operation) failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)"))
+        return .nativeFailure(operation: operation, code: code, detail: detail)
     }
 }
 
@@ -218,10 +218,12 @@ actor NativeRuntime {
 
     func embed(_ session: Session, text: String) throws -> [Float] {
         try Task.checkCancellation()
-        guard session.generation == 3 else { throw NeedleError.invalidInput("embeddings require Needle 3") }
+        guard session.generation == 3 else { throw NeedleError.embeddingUnsupported("embeddings require Needle 3") }
         try validateCString(text, name: "input")
         let api = try bind(session)
-        guard let embed = api.embed else { throw NeedleError.native("engine does not support embeddings") }
+        guard let embed = api.embed else {
+            throw NeedleError.embeddingUnsupported("engine does not support embeddings")
+        }
         let size = embed(text, UnsafeMutableBufferPointer(start: nil, count: 0))
         guard size >= 0 else { throw api.failure("embed size", code: size) }
         guard
@@ -244,7 +246,7 @@ actor NativeRuntime {
     @discardableResult
     private func bindSpeech(_ session: SpeechSession) throws -> NativeAPI {
         guard let api, api.transcribe != nil, api.setAudio != nil, api.completeAudio != nil else {
-            throw NeedleError.native("engine does not support speech; use Needle 3.1 or newer")
+            throw NeedleError.speechUnsupported("engine does not support speech; use Needle 3.1 or newer")
         }
         if speechWeights != session.weightsPath {
             let data = try Data(contentsOf: URL(fileURLWithPath: session.weightsPath))
@@ -266,7 +268,9 @@ actor NativeRuntime {
     func transcribe(_ session: SpeechSession, pcm: [Float], options: AudioOptions) throws -> Transcript {
         try Task.checkCancellation()
         let api = try bindSpeech(session)
-        guard let transcribe = api.transcribe else { throw NeedleError.native("engine does not support speech") }
+        guard let transcribe = api.transcribe else {
+            throw NeedleError.speechUnsupported("engine does not support speech")
+        }
         var buffer = [CChar](repeating: 0, count: session.bufferSize)
         let samples = pcm.isEmpty ? [Float(0)] : pcm
         let code = samples.withUnsafeBufferPointer { samples in
@@ -285,7 +289,7 @@ actor NativeRuntime {
         let api = try bindSpeech(session)
         try bind(text)
         guard let complete = api.completeAudio, let setAudio = api.setAudio else {
-            throw NeedleError.native("engine does not support speech")
+            throw NeedleError.speechUnsupported("engine does not support speech")
         }
         if text.stateless {
             api.reset()

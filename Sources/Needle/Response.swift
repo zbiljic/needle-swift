@@ -1,26 +1,5 @@
 import Foundation
 
-public enum NeedleError: Error, LocalizedError {
-    case invalidInput(String)
-    case native(String)
-    case download(String)
-    case validation(Response)
-
-    public var errorDescription: String? {
-        switch self {
-        case let .invalidInput(message), let .native(message), let .download(message):
-            "needle: \(message)"
-        case let .validation(response):
-            if response.validation?.negation == true {
-                "needle: response validation: negation detected"
-            } else {
-                "needle: response validation: ungrounded fields: "
-                    + (response.validation?.ungrounded ?? []).joined(separator: ", ")
-            }
-        }
-    }
-}
-
 public struct FunctionCall: Codable, Sendable, Equatable {
     public var name: String
     public var arguments: JSONValue?
