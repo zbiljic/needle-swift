@@ -193,7 +193,7 @@ requires a separate process. Needle 3 can reload its base archive.
 
 ## Engine downloads and caching
 
-By default, the library downloads and caches the pinned Needle 3 engine (3.1.0)
+By default, the library downloads and caches the pinned Needle 3 engine (3.3.1)
 and `needle3.cact` base weights (~35 MB). Subsequent runs use the cached files.
 
 ```swift
@@ -207,7 +207,7 @@ The library selects an engine matching the resolved generation in this order:
 1. `Configuration.libraryPath`.
 2. `NEEDLE2_LIB_PATH` or `NEEDLE3_LIB_PATH`. The legacy `NEEDLE_LIB_PATH` is a
    fallback for Needle 2 only.
-3. A checksum-verified download of the pinned Needle 2.0.4 or Needle 3.1.0 engine.
+3. A checksum-verified download of the pinned Needle 2.0.4 or Needle 3.3.1 engine.
 
 A Needle 3 library override still fetches missing base weights unless
 `weightsPath` is supplied. Manual libraries must be trusted and ABI-compatible

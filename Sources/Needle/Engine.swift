@@ -3,7 +3,7 @@ import Foundation
 
 /// Downloads the same pinned Needle engines and base weights as needle-go.
 public enum Engine {
-    public static let version = "3.1.0"
+    public static let version = "3.3.1"
     static let maximumArtifactSize = 64 * 1024 * 1024
 
     public enum Platform: String, CaseIterable, Sendable {

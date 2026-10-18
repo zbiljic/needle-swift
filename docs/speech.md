@@ -2,7 +2,7 @@
 
 `Whistle` loads the checksum-pinned ~16.9 MB `whistle.cact` archive from
 [Cactus-Compute/whistle](https://huggingface.co/Cactus-Compute/whistle) and uses
-the Needle 3.1 engine. Speech weights download only when requested; standalone
+the Needle 3 engine. Speech weights download only when requested; standalone
 transcription does not require text weights.
 
 ## Transcription

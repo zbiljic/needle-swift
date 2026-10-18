@@ -31,11 +31,11 @@ struct EngineRelease: Sendable {
     static let needle3 = pin(
         generation: 3,
         version: Engine.version,
-        source: ("Cactus-Compute/needle3", "c7c415a3d1b3d929014bc6e866d51ebb971f7089"),
+        source: ("Cactus-Compute/needle3", "93e88ede867e4311c39151285e74df513e4b835b"),
         libraryName: "libneedle3.dylib",
         checksums: [
-            .darwinARM64: "ad1cba80ede4c058692370964eec4d881a1fdc80014f7210b2d13891bad7d1c6",
-            .darwinAMD64: "31a90adbaa898ea65e92b370e80ba5830a346348022a913a8bb254ab7d20bad6",
+            .darwinARM64: "19534f411ad71312031d6df5418d0e55b8d16075c28a217aef4b921349bdfb4a",
+            .darwinAMD64: "e74ac1204ffe29d75db1215d889ad46c8add39e52042df22cd99c2e37855c273",
         ],
         weights: ("needle3.cact", "c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38")
     )

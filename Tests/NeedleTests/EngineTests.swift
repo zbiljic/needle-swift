@@ -140,7 +140,7 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
             #expect(library.checksum.count == 64)
         }
     }
-    #expect(try Engine.version(for: 0) == "3.1.0")
+    #expect(try Engine.version(for: 0) == "3.3.1")
     #expect(try Engine.version(for: 2) == "2.0.4")
     #expect(try EngineRelease(3).weights?.url.contains("/needle3/resolve/") == true)
     #expect(try EngineRelease(3).weights?.url.contains("/python/") == false)
