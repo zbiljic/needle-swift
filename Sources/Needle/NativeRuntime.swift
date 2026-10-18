@@ -145,8 +145,12 @@ struct NativeAPI: Sendable {
     }
 }
 
-// ponytail: one actor per generation serializes its global C engine; independent same-generation engines need processes.
+/// One actor per generation serializes its global C engine; independent
+/// same-generation engines need separate processes.
 actor NativeRuntime {
+    /// Caps text vectors at 4 MiB; raise it if a future model needs wider features.
+    static let maxEmbeddingFloats = 1 << 20
+
     private static let needle2 = NativeRuntime()
     private static let needle3 = NativeRuntime()
 
@@ -220,8 +224,9 @@ actor NativeRuntime {
         guard let embed = api.embed else { throw NeedleError.native("engine does not support embeddings") }
         let size = embed(text, UnsafeMutableBufferPointer(start: nil, count: 0))
         guard size >= 0 else { throw api.failure("embed size", code: size) }
-        // ponytail: cap vectors at 4 MiB; raise if a future model needs wider features.
-        guard size > 0, size <= 1 << 20 else { throw NeedleError.native("invalid embedding size \(size)") }
+        guard
+            size > 0,
+            size <= Self.maxEmbeddingFloats else { throw NeedleError.native("invalid embedding size \(size)") }
         try Task.checkCancellation()
         var output = [Float](repeating: 0, count: Int(size))
         let code = output.withUnsafeMutableBufferPointer { embed(text, $0) }

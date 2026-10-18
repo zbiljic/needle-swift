@@ -36,7 +36,8 @@ struct WeightMetadata {
         if headCodes != nil {
             return .text
         }
-        // ponytail: recognize the published v1 speech manifest; extend when its format changes.
+        // Recognize the published version-1 audio manifest only; extend this
+        // classifier when upstream publishes another speech archive layout.
         if tensor.matches(2, [13]), manifest + 1 < count {
             let value = { Float(bitPattern: data.integer(tensor.offset + $0 * 4, UInt32.self)) }
             if value(0) == 3246, value(1) == 1, value(9) == 16000 {
