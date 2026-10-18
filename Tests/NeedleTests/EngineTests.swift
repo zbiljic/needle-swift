@@ -133,7 +133,7 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
         #expect(try Engine.directory(release: release, platform: .current, override: nil).path
             .contains("/\(release.version)/"))
         for platform in Engine.Platform.allCases {
-            let library = release.library(platform: platform)
+            let library = try release.library(platform: platform)
             #expect(library.archivePath == "needle/\(release.libraryName)")
             #expect(library.url.contains("/needle\(generation)/resolve/"))
             #expect(library.url.contains("/python/cactus_needle-\(release.version)-"))
@@ -142,7 +142,11 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
     }
     #expect(try Engine.version(for: 0) == "3.1.0")
     #expect(try Engine.version(for: 2) == "2.0.4")
-    #expect(try !EngineRelease(3).baseWeights.url.contains("/python/"))
+    #expect(try EngineRelease(3).weights?.url.contains("/needle3/resolve/") == true)
+    #expect(try EngineRelease(3).weights?.url.contains("/python/") == false)
+    #expect(try EngineRelease(2).weights == nil)
+    #expect(try EngineRelease.whistle.library(platform: .current).url == EngineRelease(3).library(platform: .current)
+        .url)
     for generation in [-1, 1, 4] {
         #expect(throws: NeedleError.self) { try Engine.cached(generation: generation) }
         await #expect(throws: NeedleError.self) { try await Engine.fetch(generation: generation) }
@@ -155,7 +159,7 @@ func whistleFetchUsesVerifiedCacheWithoutTextWeights() async throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let library = try EngineRelease(3).library(platform: .current)
-    for artifact in [library, Engine.speechWeights] {
+    for artifact in [library, EngineRelease.speechWeights] {
         let target = directory.appendingPathComponent(artifact.name)
         let data = artifact.name == "whistle.cact" ? testWeights(speech: true) : Data("library".utf8)
         try data.write(to: target)
@@ -170,5 +174,6 @@ func whistleFetchUsesVerifiedCacheWithoutTextWeights() async throws {
     #expect(try await Engine.fetchWhistle(cacheDirectory: directory, session: session)
         == directory.appendingPathComponent(library.name))
     #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("needle3.cact").path))
-    #expect(Engine.speechWeights.url.contains("/Cactus-Compute/whistle/resolve/"))
+    #expect(EngineRelease.speechWeights.url.contains("/Cactus-Compute/whistle/resolve/"))
+    #expect(EngineRelease.whistle.weights?.name == "whistle.cact")
 }

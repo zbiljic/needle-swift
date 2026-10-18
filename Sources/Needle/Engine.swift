@@ -40,12 +40,14 @@ public enum Engine {
         cacheDirectory: URL? = nil,
         session: URLSession = .shared
     ) async throws -> URL {
+        let release = try EngineRelease(generation)
         let library = try await fetchLibrary(
-            generation: generation, platform: platform, cacheDirectory: cacheDirectory, session: session
+            release,
+            platform: platform,
+            cacheDirectory: cacheDirectory,
+            session: session
         )
-        if try EngineRelease(generation).generation == 3 {
-            _ = try await fetchBaseWeights(platform: platform, cacheDirectory: cacheDirectory, session: session)
-        }
+        _ = try await fetchWeights(of: release, platform: platform, cacheDirectory: cacheDirectory, session: session)
         return library
     }
 
@@ -75,7 +77,7 @@ public enum Engine {
             try validateCString(override, name: "library path")
             return URL(fileURLWithPath: override).standardizedFileURL
         }
-        return try await fetchLibrary(generation: generation, cacheDirectory: cacheDirectory)
+        return try await fetchLibrary(EngineRelease(generation), cacheDirectory: cacheDirectory)
     }
 
     /// Prepares the engine and speech weights for offline use, without fetching text weights.
@@ -83,7 +85,10 @@ public enum Engine {
         platform: Platform = .current, cacheDirectory: URL? = nil, session: URLSession = .shared
     ) async throws -> URL {
         let library = try await fetchLibrary(
-            generation: 3, platform: platform, cacheDirectory: cacheDirectory, session: session
+            .whistle,
+            platform: platform,
+            cacheDirectory: cacheDirectory,
+            session: session
         )
         _ = try await fetchSpeechWeights(platform: platform, cacheDirectory: cacheDirectory, session: session)
         return library
@@ -93,35 +98,29 @@ public enum Engine {
         platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
     ) async throws -> URL {
         try await EngineDownloads.shared.fetch(
-            artifact: speechWeights,
-            directory: directory(release: EngineRelease(3), platform: platform, override: cacheDirectory),
+            artifact: EngineRelease.speechWeights,
+            directory: directory(release: .whistle, platform: platform, override: cacheDirectory),
             session: session
         )
     }
 
-    static let speechWeights = EngineArtifact(
-        name: "whistle.cact",
-        url: "https://huggingface.co/Cactus-Compute/whistle/resolve/b358ddadd89b7a713b5aa131f23032d3cca1b251/whistle.cact",
-        checksum: "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb"
-    )
-
     static func fetchLibrary(
-        generation: Int, platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
+        _ release: EngineRelease, platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
     ) async throws -> URL {
-        let release = try EngineRelease(generation)
-        return try await EngineDownloads.shared.fetch(
+        try await EngineDownloads.shared.fetch(
             artifact: release.library(platform: platform),
             directory: directory(release: release, platform: platform, override: cacheDirectory),
             session: session
         )
     }
 
-    static func fetchBaseWeights(
-        platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
-    ) async throws -> URL {
-        let release = try EngineRelease(3)
+    /// Fetches the weights archive of a release, or returns nil when its engine embeds the model.
+    static func fetchWeights(
+        of release: EngineRelease, platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
+    ) async throws -> URL? {
+        guard let weights = release.weights else { return nil }
         return try await EngineDownloads.shared.fetch(
-            artifact: release.baseWeights,
+            artifact: weights,
             directory: directory(release: release, platform: platform, override: cacheDirectory),
             session: session
         )
@@ -261,63 +260,5 @@ private actor EngineDownloads {
         } onCancel: {
             task.cancel()
         }
-    }
-}
-
-struct EngineArtifact: Sendable {
-    let name: String
-    let url: String
-    let checksum: String
-    var archivePath: String?
-}
-
-struct EngineRelease {
-    let generation: Int
-
-    init(_ generation: Int) throws {
-        guard [0, 2, 3].contains(generation) else {
-            throw NeedleError.unsupportedGeneration("unsupported generation \(generation); want 2 or 3")
-        }
-        self.generation = generation == 0 ? 3 : generation
-    }
-
-    var version: String {
-        generation == 2 ? "2.0.4" : Engine.version
-    }
-
-    var libraryName: String {
-        generation == 2 ? "libneedle.dylib" : "libneedle3.dylib"
-    }
-
-    var rootURL: String {
-        let revision = generation == 2
-            ? "32e9e3a93b205f786929697446ae669cf0a84579"
-            : "c7c415a3d1b3d929014bc6e866d51ebb971f7089"
-        return "https://huggingface.co/Cactus-Compute/needle\(generation)/resolve/\(revision)"
-    }
-
-    func library(platform: Engine.Platform) -> EngineArtifact {
-        let architecture = platform == .darwinARM64 ? "arm64" : "x86_64"
-        let filename = "cactus_needle-\(version)-py3-none-macosx_11_0_\(architecture).whl"
-        let checksum = switch (generation, platform) {
-        case (2, .darwinARM64): "abae4cca0a4d84ec73da4bde18803b9be812a9209e48fb7fa372002ebaa60265"
-        case (2, .darwinAMD64): "071e93d996021b4f6b5bee055777cd81be9f6963d2565115ec461b9f71c7245e"
-        case (_, .darwinARM64): "ad1cba80ede4c058692370964eec4d881a1fdc80014f7210b2d13891bad7d1c6"
-        case (_, .darwinAMD64): "31a90adbaa898ea65e92b370e80ba5830a346348022a913a8bb254ab7d20bad6"
-        }
-        return EngineArtifact(
-            name: libraryName,
-            url: "\(rootURL)/python/\(filename)",
-            checksum: checksum,
-            archivePath: "needle/\(libraryName)"
-        )
-    }
-
-    var baseWeights: EngineArtifact {
-        EngineArtifact(
-            name: "needle3.cact",
-            url: "\(rootURL)/needle3.cact",
-            checksum: "c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38"
-        )
     }
 }

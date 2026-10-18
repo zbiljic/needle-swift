@@ -56,13 +56,13 @@ public final class Agent: Sendable {
         handlers = Dictionary(uniqueKeysWithValues: configuration.tools.compactMap { tool in
             tool.handler.map { (tool.schema.name, $0) }
         })
+        let cache = configuration.cacheDirectory
         let library = try await Engine.resolveLibrary(
-            generation: prepared.generation,
-            path: configuration.libraryPath,
-            cacheDirectory: configuration.cacheDirectory
+            generation: prepared.generation, path: configuration.libraryPath, cacheDirectory: cache
         )
-        if prepared.generation == 3, !prepared.tuned {
-            prepared.weightsPath = try await Engine.fetchBaseWeights(cacheDirectory: configuration.cacheDirectory).path
+        let release = try EngineRelease(prepared.generation)
+        if !prepared.tuned, let weights = try await Engine.fetchWeights(of: release, cacheDirectory: cache) {
+            prepared.weightsPath = weights.path
         }
         session = prepared
         self.runtime = runtime ?? NativeRuntime.shared(for: prepared.generation)
