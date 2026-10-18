@@ -355,8 +355,8 @@ actor NativeRuntime {
         guard data.count >= 4 else { throw NeedleError.invalidInput("weights header is truncated") }
         let tag = data.prefix(4).enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << ($1.offset * 8) }
         switch tag {
-        case 0x05E1_2A83: return 2
-        case 0x05E1_2A84: return 3
+        case Cact.needle2Tag: return 2
+        case Cact.needle3Tag: return 3
         default: throw NeedleError.invalidInput("unknown weights header 0x\(String(tag, radix: 16))")
         }
     }
