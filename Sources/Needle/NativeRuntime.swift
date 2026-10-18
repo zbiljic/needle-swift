@@ -271,7 +271,7 @@ actor NativeRuntime {
         guard let transcribe = api.transcribe else {
             throw NeedleError.speechUnsupported("engine does not support speech")
         }
-        var buffer = [CChar](repeating: 0, count: session.bufferSize)
+        var buffer = [CChar](repeating: 0, count: session.outputCapacity(samples: pcm.count))
         let samples = pcm.isEmpty ? [Float(0)] : pcm
         let code = samples.withUnsafeBufferPointer { samples in
             // The audio ABI requires nonnull PCM even for an empty clip.

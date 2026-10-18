@@ -13,8 +13,8 @@ public struct AudioOptions: Sendable, Equatable {
     }
 
     func validate(_ pcm: [Float]) throws {
-        guard pcm.count <= Whistle.maximumSamples else {
-            throw NeedleError.invalidInput("audio exceeds 30 seconds at 16000 Hz")
+        guard pcm.count <= Int(Int32.max) else {
+            throw NeedleError.invalidInput("audio has \(pcm.count) samples; want at most \(Int32.max)")
         }
         guard pcm.allSatisfy({ $0.isFinite && (-1 ... 1).contains($0) }) else {
             throw NeedleError.invalidInput("PCM samples must be finite values in [-1, 1]")
@@ -82,7 +82,9 @@ public struct WhistleConfiguration: Sendable {
 /// Opt-in speech using the same serialized process-wide engine as Needle 3 text.
 public final class Whistle: Sendable {
     public static let sampleRate = 16000
-    public static let maximumSamples = 30 * sampleRate
+    /// Bounds transcript JSON per second of audio, as upstream does, so long
+    /// clips with word timestamps fit the output buffer.
+    static let outputBytesPerSecond = 4096
 
     let session: SpeechSession
     let runtime: NativeRuntime
@@ -110,7 +112,9 @@ public final class Whistle: Sendable {
         try await self.runtime.initializeSpeech(session, library: library)
     }
 
-    /// Transcribes up to 30 seconds of 16 kHz mono PCM; empty clips and silence produce empty text.
+    /// Transcribes 16 kHz mono PCM of any length: up to 30 seconds runs as one pass, and
+    /// longer audio runs as consecutive 30 second windows with word times counted from the
+    /// start of the clip. Empty clips and silence produce empty text.
     public func transcribe(_ pcm: [Float], options: AudioOptions = AudioOptions()) async throws -> Transcript {
         try Task.checkCancellation()
         try options.validate(pcm)
@@ -142,5 +146,10 @@ public final class Whistle: Sendable {
 
 struct SpeechSession: Sendable {
     let weightsPath: String
+    /// Output capacity for clips up to about a minute; longer clips grow it.
     let bufferSize: Int
+
+    func outputCapacity(samples: Int) -> Int {
+        max(bufferSize, samples / Whistle.sampleRate * Whistle.outputBytesPerSecond)
+    }
 }

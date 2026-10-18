@@ -158,7 +158,7 @@ these vectors for search. This API does not enable automatic tool retrieval.
 ## Speech
 
 `Whistle` adds optional speech transcription and audio tool calling with
-Needle 3. It accepts 16 kHz mono `[Float]` PCM, up to 30 seconds. Speech weights
+Needle 3. It accepts 16 kHz mono `[Float]` PCM of any length. Speech weights
 are downloaded only when requested.
 
 See the [speech guide](docs/speech.md) for the API, supported languages, runtime

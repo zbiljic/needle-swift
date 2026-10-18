@@ -7,6 +7,7 @@ private final class SpeechProbe: @unchecked Sendable {
     let mode: String
     private let lock = NSLock()
     private var settings: [AudioOptions] = []
+    private var sizes: [Int] = []
     private var calls = 0
 
     init(mode: String = "ok") {
@@ -21,12 +22,18 @@ private final class SpeechProbe: @unchecked Sendable {
         lock.withLock { calls }
     }
 
+    /// Output buffer capacity of each transcription call.
+    var capacities: [Int] {
+        lock.withLock { sizes }
+    }
+
     var api: NativeAPI {
         var api = text.api
         api.setAudio = { value in self.lock.withLock { self.settings.append(value) } }
         api.lastError = { self.options.last?.language == "en" ? "audio diagnostic" : "cleared" }
         api.transcribe = { pcm, _, output in
             #expect(pcm.baseAddress != nil)
+            self.lock.withLock { self.sizes.append(output.count) }
             return self.write(
                 #"""
                 {"text":"Paris","language":"fr","ttft_ms":2,"decode_tps":3,
@@ -137,7 +144,6 @@ func speechInputValidationPrecedesNativeCalls() async throws {
         [-.infinity],
         [1.01],
         [-1.01],
-        [Float](repeating: 0, count: Whistle.maximumSamples + 1),
     ] {
         await #expect(throws: NeedleError.self) { try await speech.transcribe(pcm) }
     }
@@ -200,6 +206,22 @@ func audioCleanupSurvivesFailures(mode: String) async throws {
 }
 
 @Test
+func transcribeGrowsOutputBufferForLongClips() async throws {
+    let directory = try speechDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let probe = SpeechProbe()
+    let config = WhistleConfiguration(
+        weightsPath: directory.appendingPathComponent("speech.cact").path, libraryPath: "/test/libneedle.dylib"
+    )
+    let speech = try await Whistle(configuration: config, runtime: NativeRuntime(api: probe.api))
+    for seconds in [10, 100, 20] {
+        _ = try await speech.transcribe([Float](repeating: 0, count: seconds * Whistle.sampleRate))
+    }
+    // Short clips use the configured buffer; a long clip gets 4096 bytes per second.
+    #expect(probe.capacities == [config.bufferSize, 100 * Whistle.outputBytesPerSecond, config.bufferSize])
+}
+
+@Test
 func speechCABIArguments() throws {
     let transcribe: NativeAPI.Transcribe = { pcm, count, language, keywords, times, output, capacity in
         guard
@@ -243,7 +265,9 @@ extension NativeIntegrationTests {
     func nativeWhistleSilenceAndWeightKinds() async throws {
         let speech = try await Whistle()
         let agent = try await Agent(configuration: Configuration(stateless: true))
-        for pcm: [Float] in [[], [Float](repeating: 0, count: Whistle.sampleRate)] {
+        // A 40 s clip exceeds one 30 s window and runs as consecutive windows.
+        for seconds in [0, 1, 40] {
+            let pcm = [Float](repeating: 0, count: seconds * Whistle.sampleRate)
             let transcript = try await speech.transcribe(pcm, options: AudioOptions(wordTimestamps: true))
             #expect(transcript.text.isEmpty && transcript.language.isEmpty)
             #expect(transcript.words?.isEmpty != false)
